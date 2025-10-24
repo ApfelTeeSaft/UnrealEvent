@@ -11,13 +11,15 @@ DWORD InputThread(LPVOID)
     }
 }
 
-void Initialize()
+DWORD Initialize(LPVOID)
 {
     AllocConsole();
     FILE* File;
     freopen_s(&File, "CONOUT$", "w+", stdout);
 
     MH_Initialize();
+
+    Sleep(5000);
 
     TArray<ULocalPlayer*>& LocalPlayers = UWorld::GetWorld()->OwningGameInstance->LocalPlayers;
     LocalPlayers[0]->PlayerController->SwitchLevel(L"Athena_Terrain");
@@ -36,6 +38,8 @@ void Initialize()
     Hooks::PlayerController::Initialize();
     Hooks::Pawn::Initialize();
     Hooks::Abilities::Initialize();
+
+    return 0;
 }
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ulReason, LPVOID lpReserved)
@@ -43,7 +47,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ulReason, LPVOID lpReserved)
     switch (ulReason)
     {
     case DLL_PROCESS_ATTACH:
-        Initialize();
+        CreateThread(0, 0, Initialize, 0, 0, 0);
     case DLL_THREAD_ATTACH:
     case DLL_THREAD_DETACH:
     case DLL_PROCESS_DETACH:
