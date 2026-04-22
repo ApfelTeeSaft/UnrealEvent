@@ -1,0 +1,13 @@
+/NOLOGO
+/errorReport:prompt
+/MACHINE:x64
+/SUBSYSTEM:WINDOWS
+/DEF
+/NAME:"UE4Editor-LiveStreamVoice.dll"
+/IGNORE:4221
+/NODEFAULTLIB
+"C:\Users\buildfarm\FNGameProj 4.22\Intermediate\Build\Win64\FortniteEditor\Development\Engine\SharedPCH.Engine.h.obj"
+"C:\Users\buildfarm\FNGameProj 4.22\Plugins\Runtime\LiveStreamVoice\Intermediate\Build\Win64\UE4Editor\Development\LiveStreamVoice\Module.LiveStreamVoice.cpp.obj"
+"C:\Users\buildfarm\FNGameProj 4.22\Plugins\Runtime\LiveStreamVoice\Intermediate\Build\Win64\UE4Editor\Development\LiveStreamVoice\Module.LiveStreamVoice.gen.cpp.obj"
+"C:\Users\buildfarm\Downloads\EngineS7\Engine\Windows\Engine\Intermediate\Build\Win64\UE4Editor\Development\PCLaunch.rc.res"
+/OUT:"C:\Users\buildfarm\FNGameProj 4.22\Plugins\Runtime\LiveStreamVoice\Intermediate\Build\Win64\UE4Editor\Development\LiveStreamVoice\UE4Editor-LiveStreamVoice.lib"

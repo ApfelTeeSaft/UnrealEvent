@@ -1,0 +1,11 @@
+{
+	"BuildId": "009a0b7e-3687-4a3d-8658-c707fa176410",
+	"Modules": 
+	{
+		"Account": "UE4Editor-Account.dll",
+		"GameSubCatalog": "UE4Editor-GameSubCatalog.dll",
+		"McpProfileSys": "UE4Editor-McpProfileSys.dll",
+		"ScheduledEvents": "UE4Editor-ScheduledEvents.dll",
+		"SidecarSys": "UE4Editor-SidecarSys.dll"
+	}
+}

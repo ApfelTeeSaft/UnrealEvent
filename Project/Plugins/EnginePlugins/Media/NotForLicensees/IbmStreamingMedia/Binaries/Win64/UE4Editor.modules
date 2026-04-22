@@ -1,0 +1,8 @@
+{
+	"BuildId": "009a0b7e-3687-4a3d-8658-c707fa176410",
+	"Modules": 
+	{
+		"IbmStreamingMedia": "UE4Editor-IbmStreamingMedia.dll",
+		"IbmStreamingMediaFactory": "UE4Editor-IbmStreamingMediaFactory.dll"
+	}
+}

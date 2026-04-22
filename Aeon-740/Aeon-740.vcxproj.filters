@@ -14,6 +14,12 @@
     <ClCompile Include="SDK\CoreUObject_functions.cpp">
       <Filter>SDK</Filter>
     </ClCompile>
+    <ClCompile Include="SDK\MovieScene_functions.cpp">
+      <Filter>SDK</Filter>
+    </ClCompile>
+    <ClCompile Include="SDK\LevelSequence_functions.cpp">
+      <Filter>SDK</Filter>
+    </ClCompile>
     <ClCompile Include="SDK\Basic.cpp">
       <Filter>SDK</Filter>
     </ClCompile>
@@ -31,12 +37,6 @@
     </ClCompile>
     <ClCompile Include="MinHook\src\buffer.c">
       <Filter>MinHook</Filter>
-    </ClCompile>
-    <ClCompile Include="SDK\MovieScene_functions.cpp">
-      <Filter>SDK</Filter>
-    </ClCompile>
-    <ClCompile Include="SDK\LevelSequence_functions.cpp">
-      <Filter>SDK</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -88,9 +88,6 @@
       <Filter>Hooks</Filter>
     </ClInclude>
     <ClInclude Include="GameModeHandler.h">
-      <Filter>Handlers</Filter>
-    </ClInclude>
-    <ClInclude Include="EventHandler.h">
       <Filter>Handlers</Filter>
     </ClInclude>
   </ItemGroup>
