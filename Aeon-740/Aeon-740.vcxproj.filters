@@ -90,6 +90,9 @@
     <ClInclude Include="GameModeHandler.h">
       <Filter>Handlers</Filter>
     </ClInclude>
+    <ClInclude Include="EventHandler.h">
+      <Filter>Handlers</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Hooks">
