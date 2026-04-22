@@ -47,7 +47,7 @@ namespace EventHandler
 	static const string SoundPath_Finale = "/Game/Apfel/Audio/SC_EventFinale.SC_EventFinale";
 
 	// World-space event staging location
-	static FVector  EventStagingLocation = { 0.0f, 0.0f, 5000.0f };
+	static FVector  EventStagingLocation = { 349.57f, 509.0f, 68.0f };
 	static FRotator EventStagingRotation = { 0.0f, 0.0f, 0.0f };
 
 
@@ -213,6 +213,42 @@ namespace EventHandler
 		return OutActor;
 	}
 
+	// Block the calling thread until the sequence finishes playing naturally.
+	//
+	// Uses UMovieSceneSequencePlayer::IsPlaying() (SDK) rather than a hardcoded
+	// Sleep duration, so the phase length is always exactly as long as the
+	// sequence asset itself – no need to keep code and content in sync.
+	//
+	// The 200 ms initial sleep gives the engine's game thread one or two ticks
+	// to process the Play() call before start polling; without it IsPlaying()
+	// can return false in the very first check before playback has actually begun.
+	//
+	static void WaitForSequence(ALevelSequenceActor* SeqActor,
+	                            float FallbackTimeoutSeconds = 300.0f)
+	{
+		if (!SeqActor || !SeqActor->SequencePlayer)
+		{
+			LogInfo("EventHandler: WaitForSequence – no valid player, skipping wait.");
+			return;
+		}
+
+		ULevelSequencePlayer* Player = SeqActor->SequencePlayer;
+		float AbsTimeout = GetWorldTime() + FallbackTimeoutSeconds;
+
+		Sleep(200);
+
+		while (GetWorldTime() < AbsTimeout)
+		{
+			if (!Player->IsPlaying())
+				break;
+
+			Sleep(50);  // poll at ~20 Hz – responsive without busy-waiting
+		}
+
+		LogInfo("EventHandler: Sequence ended at {:.2f}s / {:.2f}s",
+			Player->GetPlaybackPosition(), Player->GetPlaybackEnd());
+	}
+
 	static void StopSequence(ALevelSequenceActor*& OutActor)
 	{
 		if (!OutActor) return;
@@ -235,13 +271,13 @@ namespace EventHandler
 
 		// Phase: Countdown
 		// BeginCountdown() writes WarmupCountdownEndTime onto the GameState.
-		// That field is Net-replicated; clients poll it each tick to drive the
+		// That field is Net-replicated; clients read it each tick for the HUD.
 		// HUD timer without any extra server messaging.
 		// WaitUntil() blocks this thread until the timestamp is reached.
 		CurrentPhase = ECustomEventPhase::Countdown;
 		LogInfo("EventHandler: [Countdown] Starting 30 s timestamp countdown...");
 		float EventStartTimestamp = BeginCountdown(30.0f);
-		WaitUntil(EventStartTimestamp);    // server advances exactly when timer hits 0
+		WaitUntil(EventStartTimestamp);
 		EndCountdown();
 
 		// Phase: Event Start
@@ -253,31 +289,34 @@ namespace EventHandler
 		Sleep(2000);            // brief settle time after teleport RPC propagates
 		SetAllPlayersLocked(true);
 
-		// Phase 1 – Opening cinematic (15 s)
+		// Phase 1 – Opening cinematic
+		// Duration = length of LS_CustomEvent_Phase1 (no hardcoded value needed)
 		CurrentPhase = ECustomEventPhase::Phase1;
 		LogInfo("EventHandler: [Phase1] Opening cinematic.");
 
 		ALevelSequenceActor* SeqActor = PlaySequence(SequencePath_Phase1);
 		BroadcastSound(SoundPath_Intro);
-		Sleep(15000);
+		WaitForSequence(SeqActor);   // returns when IsPlaying() == false
 		StopSequence(SeqActor);
 
-		// Phase 2 – Main event sequence (30 s)
+		// Phase 2 – Main event sequence
+		// Duration = length of LS_CustomEvent_Phase2
 		CurrentPhase = ECustomEventPhase::Phase2;
 		LogInfo("EventHandler: [Phase2] Main event sequence.");
 
 		SeqActor = PlaySequence(SequencePath_Phase2);
 		BroadcastSound(SoundPath_Main);
-		Sleep(30000);
+		WaitForSequence(SeqActor);
 		StopSequence(SeqActor);
 
-		// Phase 3 – Finale (20 s)
+		// Phase 3 – Finale
+		// Duration = length of LS_CustomEvent_Phase3
 		CurrentPhase = ECustomEventPhase::Phase3;
 		LogInfo("EventHandler: [Phase3] Finale.");
 
 		SeqActor = PlaySequence(SequencePath_Phase3);
 		BroadcastSound(SoundPath_Finale);
-		Sleep(20000);
+		WaitForSequence(SeqActor);
 		StopSequence(SeqActor);
 
 		// Phase: Event End – restore players, clear countdown state

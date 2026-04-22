@@ -176,6 +176,8 @@
     <ClCompile Include="SDK\Engine_functions.cpp" />
     <ClCompile Include="SDK\FortniteGame_functions.cpp" />
     <ClCompile Include="SDK\GameplayAbilities_functions.cpp" />
+    <ClCompile Include="SDK\LevelSequence_functions.cpp" />
+    <ClCompile Include="SDK\MovieScene_functions.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="NameCollisions.inl" />

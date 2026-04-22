@@ -32,6 +32,12 @@
     <ClCompile Include="MinHook\src\buffer.c">
       <Filter>MinHook</Filter>
     </ClCompile>
+    <ClCompile Include="SDK\MovieScene_functions.cpp">
+      <Filter>SDK</Filter>
+    </ClCompile>
+    <ClCompile Include="SDK\LevelSequence_functions.cpp">
+      <Filter>SDK</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="framework.h" />
