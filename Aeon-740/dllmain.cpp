@@ -1,5 +1,8 @@
 #include "framework.h"
 
+// asset path for the custom event map.
+static const wchar_t* CustomMapPath = L"/Game/Apfel/Maps/CustomEvent";
+
 DWORD InputThread(LPVOID)
 {
     while (true)
@@ -7,6 +10,12 @@ DWORD InputThread(LPVOID)
         if (GetAsyncKeyState(VK_F6) & 0x01)
         {
             UKismetSystemLibrary::ExecuteConsoleCommand(UWorld::GetWorld(), L"startaircraft", nullptr);
+        }
+
+        // F7 – manually force-start the live event
+        if (GetAsyncKeyState(VK_F7) & 0x01)
+        {
+            EventHandler::BeginEvent();
         }
     }
 }
@@ -22,7 +31,7 @@ DWORD Initialize(LPVOID)
     Sleep(5000);
 
     TArray<ULocalPlayer*>& LocalPlayers = UWorld::GetWorld()->OwningGameInstance->LocalPlayers;
-    LocalPlayers[0]->PlayerController->SwitchLevel(L"Athena_Terrain");
+    LocalPlayers[0]->PlayerController->SwitchLevel(CustomMapPath);
     LocalPlayers.Remove(0);
     LocalPlayers.Free();
 
@@ -55,4 +64,3 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ulReason, LPVOID lpReserved)
     }
     return TRUE;
 }
-

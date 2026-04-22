@@ -30,13 +30,36 @@ namespace Hooks
 				}
 			}
 
+			// The custom event map may not contain an AFortAthenaMapInfo actor because
+			// of skids.
+			// Guard against returning early so the listen server still comes up.
 			if (!GameState->MapInfo)
-				return false;
+			{
+				LogInfo("GameMode::ReadyToStartMatch: No MapInfo (custom event map) -> continuing without it.");
+
+				GameMode->DefaultPawnClass = SDK::APlayerPawn_Athena_C::StaticClass();
+
+				if (!Globals::bListening)
+				{
+					ServerHandler::Listen();
+					Hooks::Actor::Initialize();
+					LootHandler::Initialize();
+
+					GameMode->GameSession->MaxPlayers = 100;
+					GameMode->WarmupRequiredPlayerCount = 1;
+
+					GameState->OnRep_CurrentPlaylistInfo();
+				}
+
+				GameMode->bWorldIsReady = true;
+				return true;  // Signal that the match may start without MapInfo
+			}
 
 			GameMode->DefaultPawnClass = SDK::APlayerPawn_Athena_C::StaticClass();
 
+			// Showfoundation already guards against foundations not existing.
 			GameModeHandler::ShowFoundation(SDKUtils::FindObject<ABuildingFoundation>("/Game/Athena/Maps/Athena_POI_Foundations.Athena_POI_Foundations.PersistentLevel.LF_Athena_POI_25x36"));
-			GameModeHandler::ShowFoundation(SDKUtils::FindObject<ABuildingFoundation>("/Game/Athena/Maps/Athena_POI_Foundations.Athena_POI_Foundations.PersistentLevel.ShopsNew")); 
+			GameModeHandler::ShowFoundation(SDKUtils::FindObject<ABuildingFoundation>("/Game/Athena/Maps/Athena_POI_Foundations.Athena_POI_Foundations.PersistentLevel.ShopsNew"));
 
 			if (!Globals::bListening)
 			{

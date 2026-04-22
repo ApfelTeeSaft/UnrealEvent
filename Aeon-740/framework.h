@@ -28,6 +28,7 @@ using namespace std;
 #include "InventoryHandler.h"
 #include "LootHandler.h"
 #include "ServerHandler.h"
+#include "EventHandler.h"
 
 #include "AbilitiesHooks.h"
 #include "ActorHooks.h"

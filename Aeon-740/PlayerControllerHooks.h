@@ -74,6 +74,15 @@ namespace Hooks
 			InventoryHandler::InitializePlayer(PlayerController);
 			LootHandler::SpawnFloorLoot();
 
+			// Schedule the live event timeline on the first player to drop their
+			// loading screen. EventHandler::BeginEvent() is idempotent – calling it
+			// more than once (for additional players) is safe and has no effect.
+			if (!Globals::bEventScheduled)
+			{
+				Globals::bEventScheduled = true;
+				EventHandler::BeginEvent();
+			}
+
 			return Defines::PlayerController::ServerLoadingScreenDropped(PlayerController);
 		}
 
