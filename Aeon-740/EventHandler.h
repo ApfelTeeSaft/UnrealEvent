@@ -1,31 +1,50 @@
 #pragma once
 #include "framework.h"
+#include <ctime>
 
 // Custom Live Event System
 //
-// Architecture overview:
-//   - Reuses AFortGameStateAthena's existing replicated timestamp fields for the
-//     HUD countdown. WarmupCountdownEndTime is a Net-replicated float; the client
-//     HUD reads (WarmupCountdownEndTime - GetTimeSeconds()) to display remaining
-//     seconds. The server sets this once and never needs to push tick-by-tick
-//     updates – replication handles the rest.
-//   - Uses ALevelSequenceActor + ULevelSequencePlayer (SDK) for cinematics.
-//     bReplicatePlayback = true means all clients mirror play/stop automatically.
-//   - Uses APlayerController::ClientPlaySound (reliable replicated RPC) for audio.
-//   - Uses APlayerController::SetIgnoreMoveInput / SetIgnoreLookInput to lock players.
-//   - A dedicated Win32 thread drives the timeline. During the countdown phase the
-//     thread polls GetTimeSeconds() every 100 ms instead of calling Sleep() for the
-//     full duration, so the server wakes up exactly when the timestamp is reached.
+// Scheduling
+//   The event fires at a predefined wall-clock UTC timestamp defined by the
+//   six constants at the top of this namespace.  On startup the server computes
+//   how many seconds remain until that moment (via _mkgmtime / difftime),
+//   converts that duration into an equivalent world-time end stamp, and writes
+//   it into the replicated AFortGameStateAthena::WarmupCountdownEndTime field.
+//   Clients read that field each tick and display the remaining time.
+//   The BP_EventCountdownDisplay Blueprint Actor (documented in Pak.MD) reads
+//   the system clock directly against the same hardcoded target date and shows
+//   a DAYS / HOURS / MINUTES / SECONDS breakdown in world space.
+//
+// Cinematics
+//   Uses ALevelSequenceActor + ULevelSequencePlayer (SDK, no hooks).
+//   bReplicatePlayback = true makes the engine replicate playback state to
+//   every client automatically.  The server thread blocks on IsPlaying() so
+//   each phase lasts exactly as long as the sequence asset, no hardcoded Sleep.
+//
+// Audio
+//   APlayerController::ClientPlaySound is a reliable replicated RPC.
+//   The server fires it once per connected player; each client plays locally.
+//
+// Player management
+//   APlayerController::SetIgnoreMoveInput / SetIgnoreLookInput for locking.
+//   APawn::K2_SetActorLocation + ClientSetLocation RPC for teleport.
 
 namespace EventHandler
 {
+	// Event target time – edit these six values to reschedule the event.
+	// All values are interpreted as UTC.
+	static constexpr int TargetYear   = 2026;
+	static constexpr int TargetMonth  = 4;    // 1 – 12
+	static constexpr int TargetDay    = 22;
+	static constexpr int TargetHour   = 9;   // 24-hour clock
+	static constexpr int TargetMinute = 45;
+	static constexpr int TargetSecond = 0;
 
 	enum class ECustomEventPhase : uint8
 	{
-		Idle,        // No event scheduled yet
-		Waiting,     // Grace period – players are finished their loading screens
-		Countdown,   // HUD countdown is live; server polls until timestamp reached
-		EventStart,  // Players teleported, movement locked
+		Idle,        // No event running
+		Countdown,   // Waiting for the wall-clock target timestamp
+		EventStart,  // Players teleported and locked
 		Phase1,      // Opening cinematic
 		Phase2,      // Main event sequence
 		Phase3,      // Finale
@@ -46,42 +65,67 @@ namespace EventHandler
 	static const string SoundPath_Main   = "/Game/Apfel/Audio/SC_EventMain.SC_EventMain";
 	static const string SoundPath_Finale = "/Game/Apfel/Audio/SC_EventFinale.SC_EventFinale";
 
-	// World-space event staging location
 	static FVector  EventStagingLocation = { 349.57f, 509.0f, 68.0f };
 	static FRotator EventStagingRotation = { 0.0f, 0.0f, 0.0f };
 
-
-	// Returns the current server world time in seconds.
+	// Current server world time in seconds (same value the Sequencer and the
+	// client HUD use when they read WarmupCountdownEndTime).
 	static float GetWorldTime()
 	{
 		return UGameplayStatics::GetDefaultObj()->GetTimeSeconds(Globals::GetWorld());
 	}
 
-	// Set the centralized countdown on AFortGameStateAthena and return the
-	// absolute end timestamp.  WarmupCountdownStartTime / WarmupCountdownEndTime
-	// are Net-replicated floats; clients read them every tick to drive the HUD
-	// display without any additional server -> client messaging.
-	static float BeginCountdown(float DurationSeconds)
+	// Seconds remaining until the target UTC timestamp.
+	// Returns a negative value if the target time has already passed.
+	// _mkgmtime is the Windows CRT function that treats struct tm as UTC;
+	static double GetSecondsUntilEvent()
 	{
-		float Now       = GetWorldTime();
-		float EndTime   = Now + DurationSeconds;
+		std::tm target{};
+		target.tm_year  = TargetYear  - 1900;
+		target.tm_mon   = TargetMonth - 1;   // tm_mon is 0-indexed
+		target.tm_mday  = TargetDay;
+		target.tm_hour  = TargetHour;
+		target.tm_min   = TargetMinute;
+		target.tm_sec   = TargetSecond;
+		target.tm_isdst = 0;
+
+		std::time_t targetEpoch = _mkgmtime(&target);
+		std::time_t nowEpoch    = std::time(nullptr);
+
+		return std::difftime(targetEpoch, nowEpoch);
+	}
+
+	// Countdown state helpers
+	// WarmupCountdownEndTime is a Net-replicated float on AFortGameStateAthena.
+	// Clients read  (WarmupCountdownEndTime - GetTimeSeconds())  each tick to
+	// drive the HUD timer without any additional server -> client messaging.
+	// The BP_EventCountdownDisplay Blueprint reads the system clock directly
+	// for the D/H/M/S breakdown visible in world space.
+
+	// Set the centralised countdown timestamp and return the world-time end value.
+	// durationSeconds is the wall-clock delta already converted to world seconds.
+	static float BeginCountdown(double durationSeconds)
+	{
+		float now     = GetWorldTime();
+		float endTime = now + static_cast<float>(durationSeconds);
 
 		AFortGameStateAthena* GS = Globals::GetGameState();
 		if (GS)
 		{
-			GS->WarmupCountdownStartTime = Now;
-			GS->WarmupCountdownEndTime   = EndTime;  // <- clients read this for the timer
+			GS->WarmupCountdownStartTime = now;
+			GS->WarmupCountdownEndTime   = endTime;   // <- clients read this
 			GS->bIsInCountdown           = true;
 		}
 
-		LogInfo("EventHandler: Countdown set. EndTime={:.1f} (in {:.0f}s)", EndTime, DurationSeconds);
-		return EndTime;
+		LogInfo("EventHandler: Countdown started. World end time = {:.1f} ({:.0f}s from now)",
+			endTime, durationSeconds);
+		return endTime;
 	}
 
-	// Block the calling thread until the world clock reaches the given timestamp.
-	static void WaitUntil(float Timestamp)
+	// Poll until the world clock reaches the given timestamp (100 ms granularity).
+	static void WaitUntil(float worldTimestamp)
 	{
-		while (GetWorldTime() < Timestamp)
+		while (GetWorldTime() < worldTimestamp)
 			Sleep(100);
 	}
 
@@ -130,7 +174,6 @@ namespace EventHandler
 		for (int32 i = 0; i < Players.Num(); i++)
 		{
 			if (!Players[i]) continue;
-
 			APlayerController* PC = static_cast<APlayerController*>(Players[i]->GetOwner());
 			if (!PC) continue;
 
@@ -140,11 +183,11 @@ namespace EventHandler
 				FHitResult Hit;
 				Pawn->K2_SetActorLocation(EventStagingLocation, false, &Hit, true);
 			}
-
 			PC->ClientSetLocation(EventStagingLocation, EventStagingRotation);
 		}
 
-		LogInfo("EventHandler: Teleported {} players to staging area.", Players.Num());
+		LogInfo("EventHandler: Teleported {} players to staging area.",
+			Players.Num());
 	}
 
 	static void BroadcastSound(const string& SoundPath)
@@ -155,7 +198,7 @@ namespace EventHandler
 
 		if (!Sound)
 		{
-			LogInfo("EventHandler: Sound asset not found ({})", SoundPath);
+			LogInfo("EventHandler: Sound not found ({})", SoundPath);
 			return;
 		}
 
@@ -189,23 +232,18 @@ namespace EventHandler
 
 		FMovieSceneSequencePlaybackSettings Settings{};
 		Settings.PlayRate        = 1.0f;
-		Settings.LoopCount.Value = 0;      // play once; set to -1 for infinite loop
+		Settings.LoopCount.Value = 0;
 		Settings.StartTime       = 0.0f;
 
 		ALevelSequenceActor* OutActor = nullptr;
 		ULevelSequencePlayer* Player = ULevelSequencePlayer::CreateLevelSequencePlayer(
-			Globals::GetWorld(),
-			Sequence,
-			Settings,
-			&OutActor
-		);
+			Globals::GetWorld(), Sequence, Settings, &OutActor);
 
 		if (OutActor)
 		{
 			OutActor->bReplicatePlayback = true;
 			OutActor->SetReplicatePlayback(true);
 		}
-
 		if (Player)
 			Player->Play();
 
@@ -213,36 +251,28 @@ namespace EventHandler
 		return OutActor;
 	}
 
-	// Block the calling thread until the sequence finishes playing naturally.
-	//
-	// Uses UMovieSceneSequencePlayer::IsPlaying() (SDK) rather than a hardcoded
-	// Sleep duration, so the phase length is always exactly as long as the
-	// sequence asset itself – no need to keep code and content in sync.
-	//
-	// The 200 ms initial sleep gives the engine's game thread one or two ticks
-	// to process the Play() call before start polling; without it IsPlaying()
-	// can return false in the very first check before playback has actually begun.
-	//
+	// Block until the sequence finishes naturally (IsPlaying() -> false).
+	// 200 ms initial pause lets the engine tick Play() before the first poll.
+	// Falls back to the safety timeout if the sequence never stops.
 	static void WaitForSequence(ALevelSequenceActor* SeqActor,
 	                            float FallbackTimeoutSeconds = 300.0f)
 	{
 		if (!SeqActor || !SeqActor->SequencePlayer)
 		{
-			LogInfo("EventHandler: WaitForSequence – no valid player, skipping wait.");
+			LogInfo("EventHandler: WaitForSequence – no valid player, skipping.");
 			return;
 		}
 
 		ULevelSequencePlayer* Player = SeqActor->SequencePlayer;
 		float AbsTimeout = GetWorldTime() + FallbackTimeoutSeconds;
 
-		Sleep(200);
+		Sleep(200);  // let engine process Play() on its game thread
 
 		while (GetWorldTime() < AbsTimeout)
 		{
 			if (!Player->IsPlaying())
 				break;
-
-			Sleep(50);  // poll at ~20 Hz – responsive without busy-waiting
+			Sleep(50);
 		}
 
 		LogInfo("EventHandler: Sequence ended at {:.2f}s / {:.2f}s",
@@ -252,10 +282,8 @@ namespace EventHandler
 	static void StopSequence(ALevelSequenceActor*& OutActor)
 	{
 		if (!OutActor) return;
-
 		if (OutActor->SequencePlayer)
 			OutActor->SequencePlayer->Stop();
-
 		OutActor->K2_DestroyActor();
 		OutActor = nullptr;
 	}
@@ -264,43 +292,65 @@ namespace EventHandler
 	{
 		LogInfo("EventHandler: Timeline thread started.");
 
-		// Phase: Waiting – 10 s grace period for loading screens to clear
-		CurrentPhase = ECustomEventPhase::Waiting;
-		LogInfo("EventHandler: [Waiting] 10 s grace period...");
-		Sleep(10000);
-
 		// Phase: Countdown
-		// BeginCountdown() writes WarmupCountdownEndTime onto the GameState.
-		// That field is Net-replicated; clients read it each tick for the HUD.
-		// HUD timer without any extra server messaging.
-		// WaitUntil() blocks this thread until the timestamp is reached.
+		// Compute how many wall-clock seconds remain until the predefined UTC
+		// target.  Convert to a world-time end stamp and write it into the
+		// replicated WarmupCountdownEndTime field so every connected client's
+		// HUD shows the remaining time automatically.
+		// The BP_EventCountdownDisplay Blueprint Actor (see Pak.MD) also reads
+		// the system clock directly and displays a D/H/M/S breakdown in world
+		// space without any additional server communication.
 		CurrentPhase = ECustomEventPhase::Countdown;
-		LogInfo("EventHandler: [Countdown] Starting 30 s timestamp countdown...");
-		float EventStartTimestamp = BeginCountdown(30.0f);
-		WaitUntil(EventStartTimestamp);
-		EndCountdown();
 
-		// Phase: Event Start
+		double secsUntil = GetSecondsUntilEvent();
+
+		if (secsUntil > 0.0)
+		{
+			// Log a human-readable scheduled time
+			int64_t days    = static_cast<int64_t>(secsUntil) / 86400;
+			int64_t hours   = (static_cast<int64_t>(secsUntil) % 86400) / 3600;
+			int64_t minutes = (static_cast<int64_t>(secsUntil) % 3600) / 60;
+			int64_t seconds = static_cast<int64_t>(secsUntil) % 60;
+			LogInfo("EventHandler: [Countdown] Event scheduled in {}d {}h {}m {}s "
+				"({}/{}/{} {:02d}:{:02d}:{:02d} UTC)",
+				days, hours, minutes, seconds,
+				TargetYear, TargetMonth, TargetDay,
+				TargetHour, TargetMinute, TargetSecond);
+
+			float endWorldTime = BeginCountdown(secsUntil);
+			WaitUntil(endWorldTime);
+			EndCountdown();
+		}
+		else
+		{
+			// Target time already passed – start immediately with a short grace
+			// period so players who are mid-load-screen still make it in.
+			LogInfo("EventHandler: [Countdown] Target time already passed "
+				"({:.0f}s ago). Starting in 10 s.", -secsUntil);
+			Sleep(10000);
+		}
+
+		// Phase: Event Start – teleport players, lock movement
 		CurrentPhase = ECustomEventPhase::EventStart;
 		bEventActive  = true;
 		LogInfo("EventHandler: [EventStart] Teleporting and locking players.");
 
 		TeleportAllToStagingArea();
-		Sleep(2000);            // brief settle time after teleport RPC propagates
+		Sleep(2000);
 		SetAllPlayersLocked(true);
 
 		// Phase 1 – Opening cinematic
-		// Duration = length of LS_CustomEvent_Phase1 (no hardcoded value needed)
+		// Phase duration = length of LS_CustomEvent_Phase1
 		CurrentPhase = ECustomEventPhase::Phase1;
 		LogInfo("EventHandler: [Phase1] Opening cinematic.");
 
 		ALevelSequenceActor* SeqActor = PlaySequence(SequencePath_Phase1);
 		BroadcastSound(SoundPath_Intro);
-		WaitForSequence(SeqActor);   // returns when IsPlaying() == false
+		WaitForSequence(SeqActor);
 		StopSequence(SeqActor);
 
 		// Phase 2 – Main event sequence
-		// Duration = length of LS_CustomEvent_Phase2
+		// Phase duration = length of LS_CustomEvent_Phase2
 		CurrentPhase = ECustomEventPhase::Phase2;
 		LogInfo("EventHandler: [Phase2] Main event sequence.");
 
@@ -310,7 +360,7 @@ namespace EventHandler
 		StopSequence(SeqActor);
 
 		// Phase 3 – Finale
-		// Duration = length of LS_CustomEvent_Phase3
+		// Phase duration = length of LS_CustomEvent_Phase3
 		CurrentPhase = ECustomEventPhase::Phase3;
 		LogInfo("EventHandler: [Phase3] Finale.");
 
@@ -319,7 +369,7 @@ namespace EventHandler
 		WaitForSequence(SeqActor);
 		StopSequence(SeqActor);
 
-		// Phase: Event End – restore players, clear countdown state
+		// Phase: Event End – restore players, clear state
 		CurrentPhase = ECustomEventPhase::EventEnd;
 		LogInfo("EventHandler: [EventEnd] Restoring players.");
 
@@ -335,7 +385,6 @@ namespace EventHandler
 		LogInfo("EventHandler: Event complete.");
 		return 0;
 	}
-
 
 	static void BeginEvent()
 	{
