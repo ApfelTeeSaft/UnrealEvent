@@ -31,13 +31,13 @@
 
 namespace EventHandler
 {
-	// Event target time – edit these six values to reschedule the event.
+	// Event target time
 	// All values are interpreted as UTC.
 	static constexpr int TargetYear   = 2026;
 	static constexpr int TargetMonth  = 4;    // 1 – 12
 	static constexpr int TargetDay    = 22;
-	static constexpr int TargetHour   = 9;   // 24-hour clock
-	static constexpr int TargetMinute = 45;
+	static constexpr int TargetHour   = 12;   // 24-hour clock
+	static constexpr int TargetMinute = 0;
 	static constexpr int TargetSecond = 0;
 
 	enum class ECustomEventPhase : uint8
@@ -95,12 +95,72 @@ namespace EventHandler
 		return std::difftime(targetEpoch, nowEpoch);
 	}
 
+	// BP_EventCountdownDisplay helpers
+	//
+	// The server writes a single replicated float (CountdownEndTime, a world-time
+	// stamp) onto the placed Blueprint Actor.  Clients receive the new value via
+	// normal Actor replication and compute  (CountdownEndTime - GetGameTimeInSeconds())
+	// each second to derive the D/H/M/S display.
+	//
+	// CountdownEndTime semantics:
+	//   > 0   countdown is active; value is the world-time second when it expires
+	//   -1    event is live (server sets this at EventEnd to trigger "EVENT IS LIVE!")
+
+	static AActor* FindCountdownActor()
+	{
+		for (int32 i = 0; i < UObject::GObjects->Num(); i++)
+		{
+			UObject* Obj = UObject::GObjects->GetByIndex(i);
+			if (!Obj || !Obj->Class) continue;
+			if (Obj->Class->GetName().find("BP_EventCountdownDisplay") != string::npos)
+				return static_cast<AActor*>(Obj);
+		}
+		return nullptr;
+	}
+
+	static UProperty* FindClassProperty(UClass* Class, const string& PropName)
+	{
+		for (UStruct* S = Class; S; S = static_cast<UStruct*>(S->Super))
+		{
+			for (UField* F = S->Children; F; F = F->Next)
+			{
+				if (F->IsA(UProperty::StaticClass()) && F->GetName() == PropName)
+					return static_cast<UProperty*>(F);
+			}
+		}
+		return nullptr;
+	}
+
+	// Write a float value into the BP Actor's CountdownEndTime replicated property
+	// and call ForceNetUpdate() so the engine immediately schedules a replication
+	// packet rather than waiting for the next network tick.
+	static void SetCountdownActorEndTime(float endTime)
+	{
+		AActor* Actor = FindCountdownActor();
+		if (!Actor)
+		{
+			LogInfo("EventHandler: BP_EventCountdownDisplay actor not found in world.");
+			return;
+		}
+
+		UProperty* Prop = FindClassProperty(Actor->Class, "CountdownEndTime");
+		if (!Prop)
+		{
+			LogInfo("EventHandler: CountdownEndTime property not found on BP_EventCountdownDisplay.");
+			return;
+		}
+
+		*reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(Actor) + Prop->Offset) = endTime;
+		Actor->ForceNetUpdate();
+		LogInfo("EventHandler: Set BP_EventCountdownDisplay::CountdownEndTime = {:.2f}", endTime);
+	}
+
 	// Countdown state helpers
 	// WarmupCountdownEndTime is a Net-replicated float on AFortGameStateAthena.
 	// Clients read  (WarmupCountdownEndTime - GetTimeSeconds())  each tick to
 	// drive the HUD timer without any additional server -> client messaging.
-	// The BP_EventCountdownDisplay Blueprint reads the system clock directly
-	// for the D/H/M/S breakdown visible in world space.
+	// BP_EventCountdownDisplay is kept in sync via SetCountdownActorEndTime()
+	// which writes the same world-time stamp into the actor's replicated property.
 
 	// Set the centralised countdown timestamp and return the world-time end value.
 	// durationSeconds is the wall-clock delta already converted to world seconds.
@@ -116,6 +176,8 @@ namespace EventHandler
 			GS->WarmupCountdownEndTime   = endTime;   // <- clients read this
 			GS->bIsInCountdown           = true;
 		}
+
+		SetCountdownActorEndTime(endTime);  // replicate to BP display actor
 
 		LogInfo("EventHandler: Countdown started. World end time = {:.1f} ({:.0f}s from now)",
 			endTime, durationSeconds);
@@ -381,6 +443,10 @@ namespace EventHandler
 			GS->bIsInCountdown      = false;
 			GS->bIsInFinalCountdown = false;
 		}
+
+		// Signal the Blueprint display actor that the event is now live.
+		// Setting -1.0 causes clients to show "EVENT IS LIVE!" instead of a timer.
+		SetCountdownActorEndTime(-1.0f);
 
 		LogInfo("EventHandler: Event complete.");
 		return 0;
